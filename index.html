@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Satellite Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0b1120; color: #e2e8f0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Header ── */
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 10px 18px; background: #0f172a; border-bottom: 1px solid #1e3a5f; flex-shrink: 0; flex-wrap: wrap; gap: 8px; }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 32px; height: 32px; background: radial-gradient(circle at 35% 35%, #60a5fa, #1d4ed8); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .title { font-size: 17px; font-weight: 600; color: #f0f6ff; }
+  .subtitle { font-size: 11px; color: #64748b; }
+  .badge-live { background: #14532d; color: #4ade80; font-size: 11px; padding: 2px 10px; border-radius: 999px; font-weight: 500; display: flex; align-items: center; gap: 5px; }
+  .badge-live::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #4ade80; animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+  .clock { font-size: 12px; color: #94a3b8; font-variant-numeric: tabular-nums; }
+
+  /* ── Stats bar ── */
+  .stats-bar { display: flex; gap: 1px; background: #1e3a5f; border-bottom: 1px solid #1e3a5f; flex-shrink: 0; }
+  .stat { flex: 1; background: #0f172a; padding: 8px 14px; text-align: center; }
+  .stat-label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+  .stat-value { font-size: 18px; font-weight: 600; color: #f0f6ff; font-variant-numeric: tabular-nums; }
+  .stat-unit { font-size: 10px; color: #94a3b8; }
+
+  /* ── Layout ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+  #map { flex: 1; }
+
+  /* ── Sidebar ── */
+  .sidebar { width: 280px; background: #0f172a; border-left: 1px solid #1e3a5f; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; }
+  .sidebar-header { padding: 12px 14px; border-bottom: 1px solid #1e3a5f; font-size: 12px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; display: flex; align-items: center; justify-content: space-between; }
+  .filter-row { display: flex; gap: 4px; padding: 10px 14px; border-bottom: 1px solid #1e3a5f; flex-wrap: wrap; }
+  .filter-btn { font-size: 11px; padding: 3px 10px; border-radius: 999px; border: 1px solid #1e3a5f; background: transparent; color: #94a3b8; cursor: pointer; transition: all .15s; }
+  .filter-btn.active { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+  .sat-list { flex: 1; overflow-y: auto; }
+  .sat-list::-webkit-scrollbar { width: 4px; }
+  .sat-list::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
+  .sat-item { padding: 10px 14px; border-bottom: 1px solid #0b1120; cursor: pointer; transition: background .1s; display: flex; align-items: center; gap: 10px; }
+  .sat-item:hover { background: #1e2d45; }
+  .sat-item.selected { background: #1e3a5f; }
+  .sat-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .sat-info { flex: 1; min-width: 0; }
+  .sat-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sat-meta { font-size: 10px; color: #64748b; font-variant-numeric: tabular-nums; }
+  .sat-latency { font-size: 11px; color: #4ade80; font-weight: 500; white-space: nowrap; }
+
+  /* ── Detail panel ── */
+  .detail-panel { background: #0b1120; border-top: 1px solid #1e3a5f; padding: 12px 14px; display: none; }
+  .detail-panel.show { display: block; }
+  .detail-title { font-size: 13px; font-weight: 600; color: #60a5fa; margin-bottom: 10px; }
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .detail-cell { background: #0f172a; border-radius: 6px; padding: 7px 10px; }
+  .detail-cell-label { font-size: 10px; color: #64748b; }
+  .detail-cell-value { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  /* ── Leaflet overrides ── */
+  .leaflet-container { background: #04111e; }
+  .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: #475569 !important; font-size: 9px !important; }
+  .leaflet-control-attribution a { color: #64748b !important; }
+  .sat-marker-label { background: transparent; border: none; box-shadow: none; }
+  .sat-marker-label div { color: #fff; font-size: 10px; font-family: 'Segoe UI', sans-serif; white-space: nowrap; text-shadow: 0 0 4px #000, 0 0 8px #000; margin-left: 6px; font-weight: 500; }
+
+  /* ── Map layer toggle ── */
+  .map-toggle { position: absolute; top: 10px; left: 10px; z-index: 1000; display: flex; flex-direction: column; gap: 4px; }
+  .map-toggle button { font-size: 11px; padding: 5px 10px; border-radius: 6px; border: 1px solid #1e3a5f; background: #0f172a; color: #94a3b8; cursor: pointer; transition: all .15s; }
+  .map-toggle button.active { background: #1d4ed8; border-color: #3b82f6; color: #fff; }
+
+  @media (max-width: 700px) {
+    .sidebar { width: 100%; height: 220px; border-left: none; border-top: 1px solid #1e3a5f; }
+    .main { flex-direction: column; }
+    .stats-bar .stat { padding: 6px 8px; }
+    .stat-value { font-size: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">🛰</div>
+    <div>
+      <div class="title">Live Satellite Tracker</div>
+      <div class="subtitle">Real-time orbital propagation · SGP4 · Arsikere, Karnataka</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="badge-live">LIVE</div>
+    <div class="clock" id="utc-clock">--:--:-- UTC</div>
+  </div>
+</div>
+
+<!-- Stats bar -->
+<div class="stats-bar">
+  <div class="stat"><div class="stat-label">Tracking</div><div class="stat-value" id="s-count">—</div></div>
+  <div class="stat"><div class="stat-label">Avg Altitude</div><div class="stat-value" id="s-alt">—</div><span class="stat-unit">km</span></div>
+  <div class="stat"><div class="stat-label">Fastest</div><div class="stat-value" id="s-speed">—</div><span class="stat-unit">km/s</span></div>
+  <div class="stat"><div class="stat-label">Nearest</div><div class="stat-value" id="s-nearest">—</div><span class="stat-unit">km</span></div>
+  <div class="stat"><div class="stat-label">Best Latency</div><div class="stat-value" id="s-latency">—</div><span class="stat-unit">ms</span></div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div id="map">
+    <div class="map-toggle">
+      <button class="active" onclick="setLayer('dark')" id="l-dark">Dark</button>
+      <button onclick="setLayer('sat')" id="l-sat">Satellite</button>
+      <button onclick="setLayer('topo')" id="l-topo">Terrain</button>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Satellites</span>
+      <span id="last-update" style="font-size:10px;font-weight:400;">—</span>
+    </div>
+    <div class="filter-row">
+      <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+      <button class="filter-btn" onclick="setFilter('iss',this)">ISS</button>
+      <button class="filter-btn" onclick="setFilter('starlink',this)">Starlink</button>
+      <button class="filter-btn" onclick="setFilter('gps',this)">GPS</button>
+      <button class="filter-btn" onclick="setFilter('leo',this)">LEO</button>
+    </div>
+    <div class="sat-list" id="sat-list"></div>
+    <div class="detail-panel" id="detail-panel"></div>
+  </div>
+</div>
+
+<script>
+// ── Map setup ──────────────────────────────────────────────────────────────
+const LAYERS = {
+  dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    { attribution: '© OpenStreetMap © CARTO', maxZoom: 19, subdomains: 'abcd' }),
+  sat: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: '© Esri', maxZoom: 19 }),
+  topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    { attribution: '© OpenTopoMap', maxZoom: 17 })
+};
+
+const map = L.map('map', {
+  center: [20, 0], zoom: 2,
+  layers: [LAYERS.dark],
+  zoomControl: false
+});
+L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+let currentLayer = 'dark';
+function setLayer(name) {
+  map.removeLayer(LAYERS[currentLayer]);
+  map.addLayer(LAYERS[name]);
+  currentLayer = name;
+  ['dark','sat','topo'].forEach(n => {
+    document.getElementById('l-'+n).classList.toggle('active', n === name);
+  });
+}
+
+// ── Ground station marker ──────────────────────────────────────────────────
+const groundIcon = L.divIcon({
+  html: `<svg width="22" height="22" viewBox="0 0 22 22">
+    <circle cx="11" cy="11" r="9" fill="#f59e0b" fill-opacity=".2" stroke="#f59e0b" stroke-width="1.5"/>
+    <circle cx="11" cy="11" r="4" fill="#f59e0b"/>
+  </svg>`,
+  className: '', iconSize: [22,22], iconAnchor: [11,11]
+});
+const groundMarker = L.marker([13.31, 76.25], { icon: groundIcon })
+  .addTo(map)
+  .bindPopup('<b>Your Location</b><br>Arsikere, Karnataka, India<br>13.31°N 76.25°E');
+
+// ── State ──────────────────────────────────────────────────────────────────
+let satellites = [];
+let markers = {};
+let tracks = {};
+let beams = {};
+let selectedId = null;
+let currentFilter = 'all';
+
+// ── Satellite icon factory ─────────────────────────────────────────────────
+function satIcon(color, name, selected) {
+  const r = selected ? 8 : 5;
+  const glow = selected ? `<circle cx="11" cy="11" r="11" fill="${color}" fill-opacity=".25"/>` : '';
+  return L.divIcon({
+    html: `<div style="position:relative">
+      <svg width="22" height="22" viewBox="0 0 22 22" style="overflow:visible">
+        ${glow}
+        <circle cx="11" cy="11" r="${r}" fill="${color}" stroke="#fff" stroke-width="${selected?2:1}"/>
+      </svg>
+      <div style="position:absolute;left:13px;top:2px;color:#fff;font-size:10px;white-space:nowrap;text-shadow:0 0 4px #000,0 0 8px #000;font-weight:500">${selected ? name : ''}</div>
+    </div>`,
+    className: '', iconSize: [22,22], iconAnchor: [11,11]
+  });
+}
+
+// ── Render map markers + tracks ────────────────────────────────────────────
+function renderSatellite(sat) {
+  const vis = currentFilter === 'all' || sat.category === currentFilter;
+  const sel = sat.id === selectedId;
+
+  // Marker
+  if (!markers[sat.id]) {
+    markers[sat.id] = L.marker([sat.lat, sat.lng], { icon: satIcon(sat.color, sat.name, sel) })
+      .addTo(map)
+      .on('click', () => selectSat(sat.id));
+  } else {
+    markers[sat.id].setLatLng([sat.lat, sat.lng]);
+    markers[sat.id].setIcon(satIcon(sat.color, sat.name, sel));
+  }
+  markers[sat.id].setOpacity(vis ? 1 : 0);
+
+  // Orbit track (split at antimeridian)
+  if (tracks[sat.id]) tracks[sat.id].forEach(l => map.removeLayer(l));
+  tracks[sat.id] = [];
+  if (vis && sat.track && sat.track.length > 1) {
+    let seg = [];
+    for (let i = 0; i < sat.track.length; i++) {
+      const pt = sat.track[i];
+      if (i > 0) {
+        const prev = sat.track[i-1];
+        if (Math.abs(pt[1] - prev[1]) > 180) {
+          if (seg.length > 1) {
+            tracks[sat.id].push(L.polyline(seg, {
+              color: sat.color, weight: sel?2:1,
+              opacity: sel?0.7:0.35, dashArray: sel?null:'4,4'
+            }).addTo(map));
+          }
+          seg = [];
+        }
+      }
+      seg.push(pt);
+    }
+    if (seg.length > 1) {
+      tracks[sat.id].push(L.polyline(seg, {
+        color: sat.color, weight: sel?2:1,
+        opacity: sel?0.7:0.35, dashArray: sel?null:'4,4'
+      }).addTo(map));
+    }
+  }
+
+  // Beam line to ground station
+  if (beams[sat.id]) map.removeLayer(beams[sat.id]);
+  if (vis && sel) {
+    beams[sat.id] = L.polyline([[13.31, 76.25],[sat.lat, sat.lng]], {
+      color: '#f59e0b', weight: 1.5, opacity: 0.6, dashArray: '5,5'
+    }).addTo(map);
+  }
+}
+
+// ── Sidebar list ───────────────────────────────────────────────────────────
+function renderList() {
+  const list = document.getElementById('sat-list');
+  const visible = satellites.filter(s => currentFilter === 'all' || s.category === currentFilter);
+  list.innerHTML = visible.map(sat => `
+    <div class="sat-item ${sat.id === selectedId ? 'selected' : ''}" onclick="selectSat('${sat.id}')">
+      <div class="sat-dot" style="background:${sat.color}"></div>
+      <div class="sat-info">
+        <div class="sat-name">${sat.name}</div>
+        <div class="sat-meta">${sat.alt} km · ${sat.speed_kms} km/s</div>
+      </div>
+      <div class="sat-latency">${sat.latency_ms} ms</div>
+    </div>
+  `).join('');
+}
+
+// ── Detail panel ───────────────────────────────────────────────────────────
+function renderDetail(sat) {
+  const panel = document.getElementById('detail-panel');
+  if (!sat) { panel.classList.remove('show'); return; }
+  panel.classList.add('show');
+  panel.innerHTML = `
+    <div class="detail-title">${sat.name}</div>
+    <div class="detail-grid">
+      <div class="detail-cell"><div class="detail-cell-label">Latitude</div><div class="detail-cell-value">${sat.lat.toFixed(2)}°</div></div>
+      <div class="detail-cell"><div class="detail-cell-label">Longitude</div><div class="detail-cell-value">${sat.lng.toFixed(2)}°</div></div>
+      <div class="detail-cell"><div class="detail-cell-label">Altitude</div><div class="detail-cell-value">${sat.alt} km</div></div>
+      <div class="detail-cell"><div class="detail-cell-label">Speed</div><div class="detail-cell-value">${sat.speed_kms} km/s</div></div>
+      <div class="detail-cell"><div class="detail-cell-label">Distance</div><div class="detail-cell-value">${sat.dist_km} km</div></div>
+      <div class="detail-cell"><div class="detail-cell-label">RTT Latency</div><div class="detail-cell-value" style="color:#4ade80">${sat.latency_ms} ms</div></div>
+    </div>
+  `;
+}
+
+// ── Selection ──────────────────────────────────────────────────────────────
+function selectSat(id) {
+  selectedId = selectedId === id ? null : id;
+  const sel = satellites.find(s => s.id === selectedId);
+  renderDetail(sel || null);
+  satellites.forEach(renderSatellite);
+  renderList();
+  if (sel) map.panTo([sel.lat, sel.lng], { animate: true, duration: 0.5 });
+}
+
+// ── Filter ─────────────────────────────────────────────────────────────────
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  satellites.forEach(renderSatellite);
+  renderList();
+}
+
+// ── Stats bar ──────────────────────────────────────────────────────────────
+function updateStats() {
+  if (!satellites.length) return;
+  const alts = satellites.map(s => s.alt);
+  const speeds = satellites.map(s => s.speed_kms);
+  const dists = satellites.map(s => s.dist_km);
+  const lats = satellites.map(s => s.latency_ms);
+  document.getElementById('s-count').textContent = satellites.length;
+  document.getElementById('s-alt').textContent = (alts.reduce((a,b)=>a+b,0)/alts.length).toFixed(0);
+  document.getElementById('s-speed').textContent = Math.max(...speeds).toFixed(2);
+  document.getElementById('s-nearest').textContent = Math.min(...dists).toFixed(0);
+  document.getElementById('s-latency').textContent = Math.min(...lats).toFixed(1);
+}
+
+// ── UTC clock ──────────────────────────────────────────────────────────────
+function tickClock() {
+  const now = new Date();
+  document.getElementById('utc-clock').textContent =
+    now.toUTCString().split(' ')[4] + ' UTC';
+}
+setInterval(tickClock, 1000); tickClock();
+
+// ── Data fetch loop ────────────────────────────────────────────────────────
+async function fetchSatellites() {
+  try {
+    const res = await fetch('/api/satellites');
+    const data = await res.json();
+    satellites = data.satellites.filter(s => !s.error);
+    satellites.forEach(renderSatellite);
+    renderList();
+    updateStats();
+    const sel = satellites.find(s => s.id === selectedId);
+    renderDetail(sel || null);
+    document.getElementById('last-update').textContent =
+      new Date().toLocaleTimeString();
+  } catch(e) {
+    console.error('Fetch error:', e);
+  }
+}
+
+fetchSatellites();
+setInterval(fetchSatellites, 3000);
+</script>
+</body>
+</html>
